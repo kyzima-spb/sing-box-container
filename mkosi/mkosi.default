@@ -1,0 +1,22 @@
+# Sing-box - The universal proxy platform in a container
+
+[Distribution]
+Distribution=debian
+Release=bookworm
+
+[Output]
+Format=tar
+Output=sing-box.tar.xz
+Bootable=no
+
+[Validation]
+CheckSum=true
+
+[Packages]
+WithNetwork=true
+Packages=bash
+         curl
+         iproute2
+         jq
+         nano
+         qrencode
