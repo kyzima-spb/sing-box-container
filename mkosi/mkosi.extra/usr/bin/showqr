@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+
+base64encode() {
+  echo -n "$1" | base64 -w 0 | tr -d '='
+}
+
+
+greenLight() {
+  echo -e "\e[1;92m$1\e[0m"
+}
+
+
+usage() {
+  echo >&2 "Usage: $(basename "$0") -t STRING [OPTIONS]"
+
+	if [[ "$1" != 'short' ]]; then
+		cat 1>&2 <<-ENDOFUSAGE
+
+		Prints client connection information.
+		
+		Options:
+		  -c --config STRING    configuration file path, by default /etc/sing-box/config.json
+		  --domain STRING       the domain name if listen specifies an external interface
+		  --ip STRING           IP address if external interface is specified in listen, alias ​​for --domain
+		  -t --tag STRING       a tag used to identify a client
+		  -u --user STRING      the username used by the client
+		
+		Shadowsocks options:
+		  --ss-legacy-qr        encode only method and password in base64
+		
+		ENDOFUSAGE
+  fi
+}
+
+
+tag=''
+config='/etc/sing-box/config.json'
+domain="$(curl -fsL 2ip.ru || curl -fsL ifconfig.me  | tr -d '\n')"
+user=''
+legacyQR=false
+
+
+declare -A optionsMap=(
+  [-c]="config"
+  [--config]="config"
+  [--domain]="domain"
+  [--ip]="domain"
+  [-t]="tag"
+  [--tag]="tag"
+  [-u]="user"
+  [--user]="user"
+)
+declare -A flagsMap=(
+  [--ss-legacy-qr]="legacyQR"
+)
+
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      if [[ -v "optionsMap[$1]" ]]; then
+        declare "${optionsMap[$1]}"="$2"
+        shift 2
+      elif [[ -v "flagsMap[$1]" ]]; then
+        declare "${flagsMap[$1]}"=true
+        shift 1
+      else
+        echo >&2 "Error: Unknown option $1"
+        usage
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+[[ -z "$tag" ]] && {
+  usage 'short'
+  echo >&2 'the following arguments are required: -t or --tag'
+  exit 1
+}
+
+inbounds="$(
+  jq -c --arg tag "$tag" --arg username "$user" \ '
+    .inbounds[]
+    | select(
+        ($tag == "" or .tag == $tag) and
+        ($username == "" or any(.users[]?; .name == $username))
+      )
+  ' "$config"
+)"
+
+for i in $inbounds; do
+  protocol="$(jq -r '.type' <<< "$i")"
+
+  case "$protocol" in
+    shadowsocks)
+      auth="$(jq -r '[.method, .password] | join(":")' <<< "$i")"
+      server="$(jq -r '.listen' <<< "$i")"
+      port="$(jq -r '.listen_port' <<< "$i")"
+      name="$tag"
+
+      ip route get "$server" > /dev/null 2>&1 || server="$domain"
+      [[ -z "$name" ]] && name="$server"
+
+      [[ -n "$user" ]] && {
+        auth+=":$(jq -r --arg username "$user" '.users[]? | select(.name == $username) | .password' <<< "$i")"
+        name+="-$user"
+      }
+      
+      if $legacyQR; then
+        url="ss://$(base64encode "${auth}")@${server}:${port}#${name}"
+      else
+        url="ss://$(base64encode "${auth}@${server}:${port}")#${name}"
+      fi
+
+      greenLight 'Manual config\n'
+      echo -e "URL:      $url"
+      echo -e "Host:     $server"
+      echo -e "Port:     $port"
+      echo -e "Password: ${auth#*:}"
+      echo -e "Method:   ${auth%%:*}"
+      greenLight '\nQR Code\n'
+      qrencode -t UTF8 "$url"
+      echo
+      ;;
+    *)
+      echo >&2 "Protocol '$protocol' unsupported."
+      exit 1
+      ;;
+  esac
+done
