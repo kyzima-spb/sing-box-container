@@ -1,8 +1,6 @@
-# Sing-box - The universal proxy platform in a container
-
 [Distribution]
 Distribution=debian
-Release=bookworm
+Release=trixie
 
 [Output]
 Format=tar
@@ -11,6 +9,8 @@ Bootable=no
 
 [Validation]
 CheckSum=true
+Sign=true
+Key=62CD962F89DDC0CD
 
 [Packages]
 WithNetwork=true
